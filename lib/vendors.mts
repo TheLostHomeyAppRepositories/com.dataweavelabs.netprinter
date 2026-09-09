@@ -7,6 +7,7 @@
  */
 
 import { BROTHER_OID } from './vendors/brother.mjs';
+import { RICOH_FIRMWARE_OID } from './vendors/ricoh.mjs';
 
 /** IANA Private Enterprise Numbers of printer manufacturers. */
 const ENTERPRISES: Record<number, string> = {
@@ -68,6 +69,9 @@ export function vendorName(enterprise: number | null): string | null {
  * brand, which is the source this table exists to complement, not to replace.
  */
 const FIRMWARE_OIDS: Record<number, string> = {
+  // Answered "V1.20" on an Aficio SP C242SF, and named by Ricoh's own
+  // specification rather than inferred from the report. See RICOH_FIRMWARE_OID.
+  367: RICOH_FIRMWARE_OID,
   // Answered "4.000" on a PRO-1000, next to the model in the same branch.
   1602: '1.3.6.1.4.1.1602.1.1.1.4.0',
   2435: BROTHER_OID.firmware,

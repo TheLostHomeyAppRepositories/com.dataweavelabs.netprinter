@@ -102,6 +102,21 @@ const TYPE_COLOUR: Record<number, SupplyColour> = {
  */
 export const RICOH_NEAR_EMPTY_PERCENT = 10;
 
+/**
+ * `ricohSysVers` — the controller's software version.
+ *
+ * The Printer-MIB has no firmware object, so every brand that shows one is a
+ * brand somebody reported. Ricoh is the one where the report did not have to
+ * carry the meaning as well: the specification names this object "Version
+ * (string) of the controller system software", which is the difference between
+ * reading a version and guessing that a string near the model looks like one.
+ *
+ * Wanted because the printer's own web page shows it and the app did not, on a
+ * machine that answers nothing at all on port 631 — so IPP, the source that
+ * needs no per-brand OID, was never going to reach this one.
+ */
+export const RICOH_FIRMWARE_OID = '1.3.6.1.4.1.367.3.2.1.1.1.2.0';
+
 /** One row of the toner table. */
 export interface RicohToner {
   /** The row's own suffix, e.g. "1" — Ricoh's index, not a position in this list. */

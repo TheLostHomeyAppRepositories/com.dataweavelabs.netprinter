@@ -438,6 +438,7 @@ async function postDump({ homey, body }: Request): Promise<{
     firmware: snapshot.firmware,
     vendor: vendorName(identity.enterprise),
     supplies: snapshot.supplies,
+    inputTrays: snapshot.inputTrays,
     branch: branch === '' ? null : branch,
     deadlineAt,
     // No retries: the clock in walkBounded can only be checked between replies,

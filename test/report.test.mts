@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import type { Supply } from '../lib/printer-mib.mjs';
+import type { InputTray, Supply } from '../lib/printer-mib.mjs';
 import type { BoundedWalk } from '../lib/snmp-client.mjs';
 import type { PrinterIdentity } from '../lib/printer-reader.mjs';
 import type { DumpReportSources } from '../lib/report.mjs';
@@ -42,6 +42,17 @@ const supply = (over: Partial<Supply> = {}): Supply => ({
   ...over,
 });
 
+const tray = (over: Partial<InputTray> = {}): InputTray => ({
+  index: '1',
+  name: 'Tray 1',
+  media: 'A4',
+  type: 'sheetFeedAutoNonRemovableTray',
+  level: 250,
+  maxCapacity: 250,
+  percent: 100,
+  ...over,
+});
+
 const walked = (rows: BoundedWalk['rows'], stoppedBy: BoundedWalk['stoppedBy'] = null): BoundedWalk =>
   ({ rows, stoppedBy });
 
@@ -57,6 +68,7 @@ function sources(over: Partial<DumpReportSources> = {}): DumpReportSources {
     vendor: 'Lexmark',
     firmware: '4.000',
     supplies: [supply()],
+    inputTrays: [tray()],
     branch: null,
     deadlineAt: Date.now() + 5_000,
     walkVendorBranch: async () => walked([{ oid: '1.3.6.1.4.1.641.1', value: 42 }]),
@@ -206,6 +218,79 @@ describe('buildDumpReport', () => {
 
     assert.ok(text.includes('(no rows — this printer reports no supplies table)'), text);
     assert.ok(text.includes('## IPP'), text);
+  });
+
+  it('shows the paper trays, named and with their sentinels intact', async () => {
+    const text = await buildDumpReport(sources({
+      inputTrays: [tray(), tray({ index: '2', name: 'Bypass Tray', media: '', type: 'sheetFeedManual' })],
+    }));
+
+    assert.match(text, /## prtInputTable \(the paper trays\)/);
+    assert.match(text, /\[1\] Tray 1 · A4/);
+    assert.match(text, /level 250 \/ 250 · type sheetFeedAutoNonRemovableTray → 100 %/);
+    // The media is dropped rather than leaving a dangling separator.
+    assert.match(text, /\[2\] Bypass Tray\n/);
+  });
+
+  /**
+   * The three ways a tray shows up blank, which is the distinction this section
+   * was added to make. A `-3` row is a printer that has paper and cannot weigh
+   * it; no rows at all is a printer with no input table. They look identical on
+   * the device screen and need different answers.
+   */
+  it('tells a tray that will not say how full it is from a printer with no trays', async () => {
+    const refuses = await buildDumpReport(sources({
+      inputTrays: [tray({ level: -3, maxCapacity: -2, percent: null })],
+    }));
+    assert.match(refuses, /level -3 \/ -2 · type sheetFeedAutoNonRemovableTray → no number/);
+
+    const none = await buildDumpReport(sources({ inputTrays: [] }));
+    assert.ok(none.includes('(no rows — this printer reports no input table)'), none);
+  });
+
+  it('names a tray with nothing to name it, rather than printing a bare index', async () => {
+    // readInputTrays defaults both fields to '' when the OIDs are absent, and a
+    // space-padded prtInputName is ordinary.
+    const text = await buildDumpReport(sources({
+      inputTrays: [tray({ name: '   ', media: '' }), tray({ index: '2', name: '  Tray 2  ' })],
+    }));
+
+    assert.match(text, /\[1\] \(unnamed\)/);
+    assert.match(text, /\[2\] Tray 2 · A4/);
+  });
+
+  /**
+   * A printer with no input table whose supplies are incomplete gets IPP's
+   * trays pushed into the same list by readIpp. Printing those under a heading
+   * that names prtInputTable would say the opposite of the truth about the one
+   * case — no input table at all — that this section exists to make visible.
+   */
+  it('says so when the trays came from IPP rather than from the input table', async () => {
+    const text = await buildDumpReport(sources({
+      inputTrays: [tray({ index: 'ipp.1', media: '' })],
+    }));
+
+    assert.match(text, /no rows over SNMP — the rows below are IPP's/);
+    assert.match(text, /\[ipp\.1\] Tray 1\n/);
+    assert.match(text, /→ 100 % \(from IPP\)/);
+  });
+
+  it('does not call a tray read over SNMP an IPP one', async () => {
+    const text = await buildDumpReport(sources());
+
+    assert.doesNotMatch(text, /from IPP/);
+    assert.doesNotMatch(text, /no rows over SNMP/);
+  });
+
+  it('keeps the paper trays with the standard read, ahead of the private branch', async () => {
+    const text = await buildDumpReport(sources());
+
+    const supplies = text.indexOf('## prtMarkerSuppliesTable');
+    const trays = text.indexOf('## prtInputTable');
+    const branch = text.indexOf('## private branch');
+
+    assert.ok(supplies < trays, 'the trays follow the supplies');
+    assert.ok(trays < branch, 'both standard reads come before the private branch');
   });
 
   it('does not walk a private branch a printer has not claimed', async () => {

@@ -20,6 +20,9 @@ describe('firmwareOid', () => {
   it('points at the branch each brand answers on', () => {
     assert.equal(firmwareOid(2435), '1.3.6.1.4.1.2435.2.3.9.4.2.1.5.5.17.0');
     assert.equal(firmwareOid(1602), '1.3.6.1.4.1.1602.1.1.1.4.0');
+    // ricohSysVers. Named by Ricoh's specification, not inferred from a report,
+    // which is why one printer answering "V1.20" was enough to add it.
+    assert.equal(firmwareOid(367), '1.3.6.1.4.1.367.3.2.1.1.1.2.0');
   });
 
   /**

@@ -17,7 +17,7 @@
  * a branch that throws — without a printer on the network.
  */
 
-import type { Supply } from './printer-mib.mjs';
+import type { InputTray, Supply } from './printer-mib.mjs';
 import type { BoundedWalk, SnmpVersion } from './snmp-client.mjs';
 import type { PrinterIdentity } from './printer-reader.mjs';
 
@@ -44,6 +44,8 @@ export interface DumpReportSources {
   firmware: string | null;
   /** The standard table, as the app itself read it. */
   supplies: Supply[];
+  /** The paper trays, as the app itself read them. */
+  inputTrays: InputTray[];
   /**
    * One branch to read instead of the manufacturer's whole private branch.
    *
@@ -133,6 +135,53 @@ function standardTable(supplies: Supply[]): string[] {
   lines.push('');
 
   return lines;
+}
+
+/**
+ * The paper trays, from the same standard read and at no extra cost.
+ *
+ * Added because a report could not answer the question it was handed. A Ricoh
+ * owner asked why his tray showed nothing, and there were three answers — the
+ * printer sends no input table at all, or it sends a row saying `-3`, or it
+ * sends a level against a capacity of `-2` — that look identical on screen and
+ * need three different replies. The report showed none of them, so the only way
+ * on was to ask him to install a command-line SNMP tool, which is exactly what
+ * this report exists to spare people.
+ *
+ * The heading has to be earned, though, and very nearly was not. A printer with
+ * no input table whose supplies are incomplete gets IPP's trays pushed into the
+ * same list, all-or-nothing, by readIpp. Printing those under a heading naming
+ * prtInputTable would state the opposite of the truth for the first of the three
+ * cases above — and would never print the sentence that names it. So a row says
+ * where it came from, the way a vendor-sourced supply does.
+ */
+function paperTrays(trays: InputTray[]): string[] {
+  const lines = ['## prtInputTable (the paper trays)'];
+
+  if (trays.length === 0) {
+    lines.push('(no rows — this printer reports no input table)');
+  } else if (trays.every(fromIpp)) {
+    lines.push('(no rows over SNMP — the rows below are IPP\'s, read in their place)');
+  }
+  for (const tray of trays) {
+    const percent = tray.percent === null ? 'no number' : `${tray.percent} %`;
+    const label = [tray.name.trim(), tray.media.trim()].filter((s) => s.length > 0).join(' · ');
+    lines.push(
+      `[${tray.index}] ${label || '(unnamed)'}`,
+      // No capacity unit: prtInputCapacityUnit is not among the columns the
+      // reader walks, so there is none to print rather than one left out.
+      `      level ${tray.level} / ${tray.maxCapacity}` +
+        ` · type ${tray.type} → ${percent}` + (fromIpp(tray) ? ' (from IPP)' : ''),
+    );
+  }
+  lines.push('');
+
+  return lines;
+}
+
+/** Whether a tray row is one IPP supplied, which its index says and nothing else does. */
+function fromIpp(tray: InputTray): boolean {
+  return tray.index.startsWith('ipp.');
 }
 
 /**
@@ -412,6 +461,7 @@ export async function buildDumpReport(sources: DumpReportSources): Promise<strin
   return [
     ...header(sources),
     ...standardTable(sources.supplies),
+    ...paperTrays(sources.inputTrays),
     ...await inTime(privateBranch(sources), sources.deadlineAt, [
       '## private branch',
       'Not read: the ten seconds a Homey API call gets ran out first. Everything above',
