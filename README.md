@@ -151,6 +151,19 @@ button for anyone who wants it. A Ricoh report starts at its toner table for the
 reason — that one branch happened to fit on the machine it was written from, and will
 not on a busier one.
 
+The report shows the paper trays beside the supplies, and that section was added
+because a report could not answer a question it had been handed. A Ricoh owner asked
+why his tray showed nothing, and there were three answers — the printer sends no input
+table at all, or it sends a row saying `-3`, which means it has paper and cannot weigh
+it, or it sends a level against a capacity of `-2` — that look identical on the device
+tile and need three different replies. None of them was visible, so the only way on was
+to ask him for the command-line output this button exists to spare people.
+
+A row says where it came from, too. A printer with no input table whose supplies are
+incomplete has IPP's trays read in their place, into the same list; printing those
+under a heading that names `prtInputTable` would state the opposite of the truth about
+the first of those three cases, and would never print the sentence that names it.
+
 A report that stopped at a cap can be pointed at one branch, which is what the caps
 promise its reader when they say so. That branch is read as asked whoever made the
 printer — the Brother decoder reads six OIDs it already knows, which is the opposite
@@ -211,8 +224,13 @@ Since 1.3.0 it reads both, under one rule, the same one the vendor branch follow
 
 IPP also carries the one thing the Printer-MIB does not define at all: a firmware
 version. `printer-firmware-string-version` is standard, so a printer of any brand may
-answer it, and where it does not there are two vendor OIDs — Brother's and Canon's —
-that owners' reports have shown answering. A brand nobody has reported shows nothing
+answer it, and where it does not there are three vendor OIDs — Brother's, Canon's and
+Ricoh's — that owners' reports have shown answering. Ricoh's is the one that needed no
+arguing: `ricohSysVers` is named in Ricoh's own specification as the version of the
+controller system software, so the report that found it answering `V1.20` had only to
+establish that the printer answers, not what the answer means. That mattered on the
+machine that asked for it, which replies to nothing at all on port 631 — the standard
+attribute above was never going to reach it. A brand nobody has reported shows nothing
 rather than a guess. It is a device setting rather than a capability: a string that
 changes when someone updates the printer has no business with an Insights graph.
 
