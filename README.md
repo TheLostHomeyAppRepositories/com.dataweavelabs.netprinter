@@ -15,7 +15,7 @@ The manufacturer is detected from `sysObjectID` and used only to name the device
 | One level per cartridge, tank or maintenance unit | `prtMarkerSuppliesTable`, discovered by walk |
 | One level per paper tray, named after its tray and paper | `prtInputTable` |
 | Output tray: OK, half full, full | `prtOutputTable` plus the output error bits |
-| Responding: dims the tile the moment the printer stops answering | derived from the read itself |
+| Responding: dims the tile once a missed check is confirmed thirty seconds later | derived from the read itself |
 | Status: ready, printing, warming up, offline | `hrPrinterStatus`, `hrDeviceStatus` |
 | Panel message, e.g. "Ready" | `prtConsoleDisplayBufferText` |
 | Printer alerts, in the printer's own words | `prtAlertTable` |
@@ -399,6 +399,12 @@ npx tsc -p tsconfig.tools.json && node .toolsbuild/tools/probe.mjs 192.168.1.50 
   reason — one unreachable printer must not push the page past the limit.
 - **Do not await the first poll in `onInit`.** Homey initialises devices in
   sequence, so blocking on a sleeping printer holds up every device behind it.
+- **`onoff` has insights titles, so every change of it is a line in the device
+  log.** It used to go false on the first failed read, which made one lost UDP
+  reply cost two lines — a Brother on Wi-Fi logged nineteen in one evening while
+  it was on. The first miss after a good read is now asked again thirty seconds
+  later, and only a second silence reaches `onoff`, the status and the Flow card.
+  The follow-up counts as failure one, so `offline_after` keeps its old timing.
 
 ## Settings page
 
