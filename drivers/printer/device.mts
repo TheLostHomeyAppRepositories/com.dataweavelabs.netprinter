@@ -8,6 +8,7 @@ import {
   replayIsTrustworthy,
   resolveCapability,
 } from '../../lib/legacy-capabilities.mjs';
+import { RECHECK_DELAY_SECONDS, missedReadAction } from '../../lib/poll-recheck.mjs';
 import {
   TRAY_CAPABILITY,
   assignSupplyCapabilities,
@@ -71,6 +72,8 @@ const RENEGOTIATE_TIMEOUT_MS = 2_000;
 export default class PrinterDevice extends Homey.Device {
   private reader!: PrinterReader;
   private timer: NodeJS.Timeout | null = null;
+  /** Set between a first missed read and the follow-up that confirms it. */
+  private recheck: NodeJS.Timeout | null = null;
   private consecutiveFailures = 0;
   /** Guards against a slow poll overlapping the next tick. */
   private polling = false;
@@ -240,15 +243,55 @@ export default class PrinterDevice extends Homey.Device {
       const snapshot = await this.withDeadline(this.reader.read());
       this.consecutiveFailures = 0;
       this.renegotiated = false;
+      this.clearRecheck();
       if (!this.getAvailable()) await this.setAvailable();
       await this.applySnapshot(snapshot);
       await this.rememberFirmware(snapshot.firmware);
       this.lastPoll = { at: new Date().toISOString(), outcome: 'ok' };
     } catch (error) {
-      this.lastPoll = { at: new Date().toISOString(), outcome: `failed: ${(error as Error).message}` };
-      await this.handleFailure(error);
+      const outcome = `failed: ${(error as Error).message}`;
+      const action = missedReadAction({
+        consecutiveFailures: this.consecutiveFailures,
+        recheckPending: this.recheck !== null,
+        pollIntervalSeconds: this.readSettings().pollInterval,
+      });
+
+      if (action === 'recheck') {
+        this.lastPoll = { at: new Date().toISOString(), outcome: `${outcome} (asking again in ${RECHECK_DELAY_SECONDS}s)` };
+        this.scheduleRecheck();
+      } else {
+        this.lastPoll = { at: new Date().toISOString(), outcome };
+        this.clearRecheck();
+        await this.handleFailure(error);
+      }
     } finally {
       this.polling = false;
+    }
+  }
+
+  /**
+   * Asks the printer again shortly after a first missed read. See poll-recheck.
+   *
+   * Kept as a timer rather than a flag because the timer is the state: while it
+   * is set, the next miss is the follow-up and is believed. It stays set until
+   * that poll has settled, so a follow-up that finds `polling` already held by
+   * a refresh leaves the refresh's result to decide.
+   */
+  private scheduleRecheck(): void {
+    this.clearRecheck();
+    this.recheck = this.homey.setTimeout(() => {
+      // A poll already in flight is the follow-up: it sees the recheck pending
+      // and settles it either way. Clearing it here would let that poll's miss
+      // pass for a fresh first one and push the offline state back again.
+      if (this.polling) return;
+      void this.poll().finally(() => this.clearRecheck());
+    }, RECHECK_DELAY_SECONDS * 1_000);
+  }
+
+  private clearRecheck(): void {
+    if (this.recheck !== null) {
+      this.homey.clearTimeout(this.recheck);
+      this.recheck = null;
     }
   }
 
@@ -256,7 +299,7 @@ export default class PrinterDevice extends Homey.Device {
    * Absorbs a short outage, then reports the printer as unavailable.
    *
    * The status capability is set to `offline` immediately either way, so a Flow
-   * watching the status reacts on the first missed poll even while the device
+   * watching the status reacts on the first confirmed miss even while the device
    * itself is still nominally available.
    */
   private async handleFailure(error: unknown): Promise<void> {
@@ -284,7 +327,7 @@ export default class PrinterDevice extends Homey.Device {
     // flow — asks the user to repair a printer they switched off themselves. A
     // user who wanted the tile greyed found that trade a bad one: "no stats
     // available as homey insists on a repair". The status capability still says
-    // `offline` on the first missed check either way, so Flows lose nothing.
+    // `offline` on the first confirmed miss either way, so Flows lose nothing.
     if (offlineAfter === 0) {
       // The flag was cleared above rather than merely not set: it survives an
       // app restart and only a successful read ever lifted it, so a device
@@ -734,6 +777,8 @@ export default class PrinterDevice extends Homey.Device {
   async reconfigure(): Promise<void> {
     this.buildReader();
     this.consecutiveFailures = 0;
+    // A follow-up owed to the old address says nothing about the new one.
+    this.clearRecheck();
     await this.poll();
   }
 
@@ -780,6 +825,7 @@ export default class PrinterDevice extends Homey.Device {
       this.homey.setTimeout(() => {
         this.buildReader();
         this.consecutiveFailures = 0;
+        this.clearRecheck();
         void this.poll();
       }, 500);
     }
@@ -803,9 +849,11 @@ export default class PrinterDevice extends Homey.Device {
 
   override async onUninit(): Promise<void> {
     this.clearTimer();
+    this.clearRecheck();
   }
 
   override async onDeleted(): Promise<void> {
     this.clearTimer();
+    this.clearRecheck();
   }
 }
